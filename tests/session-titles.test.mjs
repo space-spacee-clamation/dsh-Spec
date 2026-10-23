@@ -20,10 +20,16 @@ test('every phase key maps to its visible Chinese label', () => {
     'apply',
     'archive',
     'archived',
+    'design',
+    'dev',
     'explore',
+    'plan',
+    'pm',
+    'product',
     'propose',
     'sync',
     'synced',
+    'test',
     'update',
   ])
   assert.equal(PHASE_LABELS.explore, '探索')
@@ -34,6 +40,12 @@ test('every phase key maps to its visible Chinese label', () => {
   assert.equal(PHASE_LABELS.archive, '归档')
   assert.equal(PHASE_LABELS.synced, '已同步')
   assert.equal(PHASE_LABELS.archived, '已归档')
+  assert.equal(PHASE_LABELS.product, '产品')
+  assert.equal(PHASE_LABELS.design, '设计')
+  assert.equal(PHASE_LABELS.dev, '开发')
+  assert.equal(PHASE_LABELS.test, '测试')
+  assert.equal(PHASE_LABELS.plan, '规划')
+  assert.equal(PHASE_LABELS.pm, 'PM')
 })
 
 test('composes a bracket-prefixed title for every phase', () => {

@@ -217,6 +217,37 @@ sentence, capped at 32 chars; e.g. `新增幼狮卡牌`). `description` is the c
 kept in the payload for compatibility; the 0.10.0 panel renders the digest fields instead. `highlights` are up to four `## What Changes` bullets. Inline
 markdown is stripped. Missing sections fall back to metadata, then to an empty summary — never an
 error.
+
+`src/native/orchestration.js` (multi-role programs):
+```js
+export async function createProgram(cwd, input, { date? })
+// -> Program; writes program.json + one .openspec.yaml per child change
+export async function readProgram(cwd, id)              // -> Program
+export async function readPrograms(cwd, workspaceState) // -> { programs, warnings }
+export async function evaluateProgram(cwd, program, workspaceState) // -> gates + task matrix
+export async function buildRolePrompt(cwd, program, task, role, workspaceState)
+export async function acceptTask(cwd, program, task, accepted)
+export async function updateProgramRoles(cwd, program, roles)
+export async function updateProgramAuto(cwd, program, auto)
+export async function writePlanDraft(cwd, { id, goal, roles }) // -> draft; writes .drafts/<id>.json
+export async function readPlanDraft(cwd, id)
+export async function readPlan(cwd, id)          // -> { title, tasks } | null
+export async function buildPlanPrompt(cwd, draft) // planner writes .plans/<id>.json only
+export async function buildPmPrompt(cwd, evaluatedProgram) // PM writes pm/status.md only
+export function normalizeRoles(rawRoles)          // pm + four work roles
+```
+Layout: `openspec/orchestration/<program>/program.json` and
+`openspec/orchestration/<program>/handoffs/<task>-<role>.md`. A program has `roles` (product /
+design / dev / test, each `provider` + `model`), and child tasks (`id`, `change`, `title`,
+`description`, `dependsOn`, `roles`, `accepted`). `evaluateProgram` derives role `done` from native
+artifacts (`proposal/specs/tasks`, `design.md`, all task checkboxes, `qa/report.md`) and role
+`ready` from the gate + dependency contracts. `buildRolePrompt` reads only the program goal, the
+task, dependency proposal/spec/design/handoff and the role's own artifacts; it never includes
+another role's conversation. Invalid ids, duplicate changes and dependency cycles are rejected.
+The create flow stores only the goal + role models in `.drafts/<id>.json`; `/opsx-plan` asks
+the planner model to write `.plans/<id>.json` (1–8 tasks + dependencies), and the Host creates the
+program and change scaffolds only after `readPlan` validates that file.
+
 `computeWorkspaceState`: read config, project schemas, bundled schemas, list `openspec/changes/*`
 (skip `archive`), compute each change (metadata, resolved schema, artifact states, tasks, docs,
 delta summary, validation), read main specs under `openspec/specs/**`, list archive directories
@@ -296,9 +327,24 @@ without network.
   changes: [ChangeState], specs: [SpecState],
   archived: [{ name, changeName, date, path }],
   skills: { native: [{ name, root, path, description, workflow }], fallbackActive: boolean },
+  orchestration: [ProgramState],
   warnings: []
 }
 ```
+```js
+ProgramState = {
+  id, title, goal, created,
+  roles: { pm|product|design|dev|test: { provider, model, label } },
+  auto, pmStatus,
+  progress: { accepted, done, total },
+  tasks: [{ id, change, title, description, dependsOn, roles: [role], accepted,
+            changeExists, summary, progress: { done, total },
+            status: 'pending'|'active'|'done'|'accepted',
+            roles: { [role]: { status: 'done'|'ready'|'waiting', ready, done, missing: [string], note? } } }]
+}
+```
+`orchestration` is read by `state` from `openspec/orchestration/*/program.json` and evaluated
+against the same `changes` list; malformed programs become `warnings`, not route failures.
 ```js
 ChangeState = {
   name, schemaName, schemaSource: 'project'|'builtin',
@@ -353,10 +399,21 @@ request cap. Route methods (Lead, `src/host.js`):
 | `report-prompt` | `{ cwd, scope?: 'change'\|'range', path?, name?, from?, to?, reportRoot?, inArchive? }` | `{ text, scope, report: { path, absolutePath, exists }, template: { path, version }, included? }` |
 | `report-status` | same payload shape as `report-prompt` | `{ scope, exists, path, absolutePath?, generatedAt?, source?, included? }` |
 | `task-toggle` | `{ cwd, change, line, done }` | `{ ok, change, path, line, done, manual, task }` |
+| `orchestration-draft` | `{ cwd, draft: { id, goal, roles } }` | `{ ok, id }` |
+| `orchestration-plan` | `{ cwd, id }` | `{ ok, plan: { title, tasks } | null, error? }` |
+| `orchestration-create` | `{ cwd, program }` | `{ ok, id }` |
+| `orchestration-accept` | `{ cwd, program, task, accepted }` | `{ ok }` |
+| `orchestration-auto` | `{ cwd, program, auto }` | `{ ok }` |
+| `orchestration-roles` | `{ cwd, program, roles }` | `{ ok }` |
 | `init` | `{ cwd }` | `{ ok: true, text, created }` |
 
 `cwd` must be an absolute path accepted by `ctx.workspaceRegistry.resolveByPath`; otherwise reject.
-Only `init` and `task-toggle` write. `task-toggle` validates the change name, resolves the schema's
+Only `init`, `task-toggle` and the `orchestration-*` methods write. `orchestration-draft` writes
+the goal/role draft and creates the `.plans/` directory; `orchestration-plan` is read-only;
+`orchestration-create`
+refuses to overwrite an existing program or child change; `orchestration-accept` only flips the
+user's final acceptance flag; `orchestration-roles` only updates role provider/model. `task-toggle`
+validates the change name, resolves the schema's
 `apply.tracks` file (default `tasks.md`), toggles exactly the 1-based checkbox line, preserves CRLF
 and BOM, and rejects a stale/non-task line instead of guessing. Direct command results are
 `{kind:'success'|'error', text}`.
@@ -518,7 +575,10 @@ directly with no model message.
   pending-interaction transitions. Workflow state has no hidden store — everything re-derives from
   the route. The only browser-local state is the `change → sessionId` binding map
   (`localStorage`, key `dsh-spec.bindings.v1`), used to route actions to one conversation per change;
-  it can be rebuilt from the Host's `[阶段] 主题` session titles.
+  it can be rebuilt from the Host's `[阶段] 主题` session titles. Multi-role sessions use a separate
+  `(program, task, role) → sessionId` map (`dsh-spec.roles.v1`). The panel applies the role's
+  `provider/model` through `ctx.sessions.selectModel` before `/opsx-role`; model selection failure
+  aborts the start instead of silently falling back.
 - Build: `src/client.js` stays a classic script (no import/export, only `require('react')`).
   `src/client-helpers.js` is ESM (exported pure functions, no imports) and is inlined by
   `tools/build.mjs` into the `/* @@CLIENT_HELPERS@@ */` marker inside the client factory
@@ -532,7 +592,9 @@ directly with no model message.
   once with per-file operation counts, metadata group last), only non-empty validation blocks
   rendered, expansion state kept in memory only; aggregate “waiting for acceptance” section that
   groups unchecked tasks into manual (`[人工验收]`) and other, with direct ticks and tasks.md links;
-  project config + schema view (project vs builtin source); capability specs view (Purpose,
+  multi-role section: create program (goal + PM/four role models; AI plans tasks), auto-advance toggle,
+  PM review/status, task × role matrix with done/ready/waiting/running states, dependency reasons,
+  start/continue role, model settings, and user acceptance; project config + schema view (project vs builtin source); capability specs view (Purpose,
   requirement/scenario counts, nested grouping); archive view grouped by local date with on-demand
   artifacts/tasks/metadata; pagination/“+N more” instead of silent truncation, document reader
   truncation notice, bound-session live status and manual task toggles; quick bar with native

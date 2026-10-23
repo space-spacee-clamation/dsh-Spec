@@ -1,8 +1,8 @@
 {
   "name": "dsh-spec",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
-  "description": "OpenSpec 原生语义的 DSH 前端：原生 schema/artifact 状态、内置 12 个 OPSX 工作流 skills（MIT 标注）、AI sync/archive 与确定性快路径、/opsx-* 命令与工作区面板（不依赖 openspec CLI）。",
+  "description": "OpenSpec 原生语义的 DSH 前端：原生 schema/artifact 状态、多角色任务编排（产品/设计/开发/测试独立模型会话）、内置 12 个 OPSX 工作流 skills（MIT 标注）、AI sync/archive 与确定性快路径、/opsx-* 命令与工作区面板（不依赖 openspec CLI）。",
   "type": "module",
   "main": "lib/index.js",
   "repository": {

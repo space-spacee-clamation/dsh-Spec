@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.12.0
+
+多角色任务编排：一个目标拆成多个原生 change 子任务，PM 把控进度并自动推进，产品 / 设计 / 开发 / 测试各自使用独立会话与模型，按依赖工件门禁推进；角色之间只交换工件与 handoff，不共享对话。
+
+### Added
+
+- **多角色任务面板**：新建程序时用户只填最终目标与 PM / 产品 / 设计 / 开发 / 测试五个角色的 `provider/model`；AI 规划会话自动拆分子任务、生成程序标题 / ID / change 名，Host 校验后再为每个子任务生成原生 change 骨架。
+- **AI 任务拆分**：`/opsx-plan <draft-id>` 让规划模型把目标拆成 1–8 个任务（含依赖），只写 `openspec/orchestration/.plans/<id>.json`，不创建 change、不写业务代码；客户端轮询该文件，成功后调用 `orchestration-create`，超时 5 分钟并给出可读错误。
+- **角色会话与模型**：每个 `(program, task, role)` 绑定独立会话；启动角色时通过 `ctx.sessions.selectModel` 应用该角色的 provider/model，支持之后在「模型」对话框中修改。
+- **依赖门禁**：产品完成后设计/开发可开始；设计完成后 UI 开发才具备完整上下文；测试需设计 + 开发任务全部完成；用户验收需测试报告。面板显示每个角色的完成 / 可开始 / 等待 / 运行中状态与缺失原因。
+- **`/opsx-role` 命令**：Host 再次校验门禁，组合角色上下文包并提交给会话；`--force` 可显式跳过门禁。
+- **PM 自动推进**：程序默认 `auto: true`，面板调度器按门禁每轮最多启动 2 个已就绪角色；同一角色失败/空闲后 2 分钟冷却；测试完成后停在用户验收，不自动代替用户。
+- **PM 巡检**：`/opsx-pm <program>` 让 PM 模型读取任务×角色矩阵与 handoff，写 `openspec/orchestration/<program>/pm/status.md`，报告阻塞、风险与下一步；`orchestration-auto` 路由可随时暂停/恢复自动推进。
+- **上下文包**：只包含程序目标、当前子任务、依赖任务的 proposal/specs/design、角色自己的工件与短 handoff；不包含其他角色对话。
+- **文件布局**：`openspec/orchestration/<program>/program.json`、`handoffs/<task>-<role>.md`、`pm/status.md`；程序元数据是插件扩展，子任务仍是标准 OpenSpec change。
+- **测试**：`native-orchestration` 覆盖创建、依赖门禁、上下文包、验收、环检测与 PM 报告；Host 路由、`/opsx-plan`、`/opsx-pm` 与 `/opsx-role` 命令均有测试，并与 0.11.0 人类报告回归共存（全套 513 项）。
+
+### Changed
+
+- Host `state` 载荷新增 `orchestration` 数组、`auto` 与 `pmStatus`；新增 `orchestration-draft` / `orchestration-plan` / `orchestration-create` / `orchestration-accept` / `orchestration-auto` / `orchestration-roles` 路由。
+- 命令注册新增 `/opsx-plan`、`/opsx-pm` 与 `/opsx-role`（共 12 条）；会话标题新增 `[规划]` / `[PM]` / `[产品]` / `[设计]` / `[开发]` / `[测试]` 阶段。
+- README 增补多角色协作、门禁、上下文包与命令说明；保留 0.11.0 人类报告和演示视频。
+- 插件版本 `0.11.0` → `0.12.0`。
+
 ## 0.11.0
 
 新增「人类报告」：对已归档变更（单个，或按时间段汇总）一键生成给人看的 HTML 报告；面板只把报告提示词填入会话输入框，不自动发送。
